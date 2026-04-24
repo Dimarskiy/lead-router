@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth, LoginPage } from './Auth.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Managers from './pages/Managers.jsx';
+import Schedule from './pages/Schedule.jsx';
 import Rules from './pages/Rules.jsx';
 import Assignments from './pages/Assignments.jsx';
 import Analytics from './pages/Analytics.jsx';
@@ -10,6 +11,7 @@ import Settings from './pages/Settings.jsx';
 const PAGES = [
   { id: 'dashboard',   label: 'Дашборд',    icon: '◈' },
   { id: 'managers',    label: 'Менеджеры',  icon: '◉' },
+  { id: 'schedule',    label: 'Расписание', icon: '◴' },
   { id: 'rules',       label: 'Правила',    icon: '◧' },
   { id: 'assignments', label: 'Назначения', icon: '◫' },
   { id: 'analytics',   label: 'Аналитика',  icon: '◑' },
@@ -40,6 +42,7 @@ export default function App() {
       <main className="main">
         {page === 'dashboard'   && <Dashboard />}
         {page === 'managers'    && <Managers />}
+        {page === 'schedule'    && <Schedule />}
         {page === 'rules'       && <Rules />}
         {page === 'assignments' && <Assignments />}
         {page === 'analytics'   && <Analytics />}

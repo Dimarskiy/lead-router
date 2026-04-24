@@ -79,6 +79,42 @@ router.get('/managers/pipedrive-users', async (req, res) => {
   }
 });
 
+// ─── Manager schedules (per-weekday) ───────────────────────────────────────
+
+router.get('/schedules', (req, res) => {
+  const rows = db.prepare('SELECT * FROM manager_schedules').all();
+  res.json(rows);
+});
+
+router.put('/schedules/:manager_id', (req, res) => {
+  const managerId = parseInt(req.params.manager_id, 10);
+  const days = Array.isArray(req.body?.days) ? req.body.days : [];
+
+  const del = db.prepare('DELETE FROM manager_schedules WHERE manager_id = ? AND weekday = ?');
+  const ins = db.prepare(`
+    INSERT INTO manager_schedules (manager_id, weekday, shift_start, shift_end, is_day_off)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const tx = db.transaction(() => {
+    for (const d of days) {
+      const wd = parseInt(d.weekday, 10);
+      if (!Number.isInteger(wd) || wd < 0 || wd > 6) continue;
+      del.run(managerId, wd);
+      ins.run(
+        managerId,
+        wd,
+        d.shift_start || null,
+        d.shift_end || null,
+        d.is_day_off ? 1 : 0,
+      );
+    }
+  });
+  tx();
+
+  const rows = db.prepare('SELECT * FROM manager_schedules WHERE manager_id = ?').all(managerId);
+  res.json(rows);
+});
+
 // ─── Products (for rule builder) ───────────────────────────────────────────
 
 router.get('/products', async (req, res) => {

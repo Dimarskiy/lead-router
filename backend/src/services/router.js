@@ -36,12 +36,36 @@ function currentHM(tz) {
   }
 }
 
-function isWithinShift(manager, hm) {
-  if (!manager.shift_start || !manager.shift_end) return true; // no shift → always on
-  const s = manager.shift_start, e = manager.shift_end;
+function currentWeekday(tz) {
+  try {
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short' });
+    const map = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[fmt.format(new Date())] ?? new Date().getDay();
+  } catch {
+    return new Date().getDay();
+  }
+}
+
+function timeInRange(hm, s, e) {
+  if (!s || !e) return true;
   if (s === e) return true;
   if (s < e) return hm >= s && hm < e;
-  return hm >= s || hm < e; // overnight (e.g. 22:00–06:00)
+  return hm >= s || hm < e;
+}
+
+function isWithinShift(manager, hm, schedule) {
+  // Per-weekday schedule wins if present
+  if (schedule) {
+    if (schedule.is_day_off) return false;
+    if (schedule.shift_start && schedule.shift_end) {
+      return timeInRange(hm, schedule.shift_start, schedule.shift_end);
+    }
+    // row exists with no times → treat as 24h
+    return true;
+  }
+  // Fallback to manager's default shift
+  if (!manager.shift_start || !manager.shift_end) return true;
+  return timeInRange(hm, manager.shift_start, manager.shift_end);
 }
 
 // ── Rule evaluation ──────────────────────────────────────────────────
@@ -99,14 +123,22 @@ function getNextManager(managerIds, excludeIds = []) {
   if (available.length === 0) return null;
 
   const weights = getWeights();
-  const hm = currentHM(getSetting('timezone', 'Europe/Moscow'));
+  const tz = getSetting('timezone', 'Europe/Moscow');
+  const hm = currentHM(tz);
+  const weekday = currentWeekday(tz);
 
   const placeholders = available.map(() => '?').join(',');
   const rows = db.prepare(
     `SELECT * FROM managers WHERE id IN (${placeholders}) AND is_active = 1 ORDER BY round_robin_order ASC`
   ).all(...available);
 
-  const candidates = rows.filter(m => isWithinShift(m, hm));
+  const schedRows = db.prepare(
+    `SELECT * FROM manager_schedules WHERE manager_id IN (${placeholders}) AND weekday = ?`
+  ).all(...available, weekday);
+  const schedMap = {};
+  schedRows.forEach(s => { schedMap[s.manager_id] = s; });
+
+  const candidates = rows.filter(m => isWithinShift(m, hm, schedMap[m.id]));
   if (candidates.length === 0) {
     console.log(`[Router] No managers on shift at ${hm} (candidates: ${rows.map(r => r.name).join(', ')})`);
     return null;

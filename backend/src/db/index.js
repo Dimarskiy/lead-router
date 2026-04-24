@@ -112,6 +112,15 @@ async function initDb() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS manager_schedules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      manager_id INTEGER NOT NULL,
+      weekday INTEGER NOT NULL,
+      shift_start TEXT,
+      shift_end TEXT,
+      is_day_off INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(manager_id, weekday)
+    );
   `);
 
   // ── Migrations: add columns idempotently ─────────────────────────
