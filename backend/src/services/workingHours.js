@@ -37,24 +37,45 @@ function timeInRange(hm, s, e) {
   return hm >= s || hm < e;
 }
 
+function managerOnShift(manager, schedule, hm) {
+  if (schedule) {
+    if (schedule.is_day_off) return false;
+    if (schedule.shift_start && schedule.shift_end) {
+      return timeInRange(hm, schedule.shift_start, schedule.shift_end);
+    }
+    return true; // row exists with no times → 24h
+  }
+  if (!manager.shift_start || !manager.shift_end) return true; // 24/7
+  return timeInRange(hm, manager.shift_start, manager.shift_end);
+}
+
 /**
- * Returns true if "now" falls inside configured business hours.
- * If work_hours_enabled = 'false' → always true (queueing disabled).
+ * Working hours = any active manager is currently on shift
+ * (per-weekday schedule, or their fallback shift in the manager card).
+ * If nobody is on shift → off-hours → leads should be queued.
+ *
+ * If queue_when_off_shift = 'false' (default), queueing is disabled and
+ * the system always treats the moment as working hours.
  */
 function isWorkingHours() {
-  if (getSetting('work_hours_enabled', 'false') !== 'true') return true;
+  if (getSetting('queue_when_off_shift', 'false') !== 'true') return true;
 
   const tz = getSetting('timezone', 'Europe/Moscow');
-  const start = getSetting('work_start', '09:00');
-  const end   = getSetting('work_end',   '20:00');
-  const daysCsv = getSetting('work_days', '1,2,3,4,5');
-  const allowedDays = daysCsv.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
-
-  const wd = currentWeekday(tz);
-  if (!allowedDays.includes(wd)) return false;
-
   const hm = currentHM(tz);
-  return timeInRange(hm, start, end);
+  const wd = currentWeekday(tz);
+
+  const managers = db.prepare('SELECT * FROM managers WHERE is_active = 1').all();
+  if (managers.length === 0) return true; // no managers — let normal "no manager" path notify
+
+  const ids = managers.map(m => m.id);
+  const placeholders = ids.map(() => '?').join(',');
+  const schedRows = db.prepare(
+    `SELECT * FROM manager_schedules WHERE manager_id IN (${placeholders}) AND weekday = ?`
+  ).all(...ids, wd);
+  const schedMap = {};
+  schedRows.forEach(s => { schedMap[s.manager_id] = s; });
+
+  return managers.some(m => managerOnShift(m, schedMap[m.id], hm));
 }
 
 module.exports = { isWorkingHours };

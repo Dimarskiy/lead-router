@@ -160,10 +160,7 @@ async function initDb() {
   upsertDefault('timezone', process.env.TIMEZONE || 'Europe/Moscow');
   upsertDefault('weight_full', '1.0');
   upsertDefault('weight_part', '0.6');
-  upsertDefault('work_hours_enabled', 'false');
-  upsertDefault('work_start', '09:00');
-  upsertDefault('work_end',   '20:00');
-  upsertDefault('work_days',  '1,2,3,4,5');
+  upsertDefault('queue_when_off_shift', 'false');
 
   console.log('[DB] SQLite ready at', DB_PATH);
   return dbInstance;
