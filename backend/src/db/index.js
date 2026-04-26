@@ -138,6 +138,7 @@ async function initDb() {
   addCol('managers', 'shift_end',     'TEXT');
   addCol('managers', 'rr_credit',     'REAL NOT NULL DEFAULT 0');
   addCol('rules',    'conditions',    "TEXT NOT NULL DEFAULT '[]'");
+  addCol('assignments', 'is_manual_distribution', 'INTEGER NOT NULL DEFAULT 0');
 
   // Migrate legacy rules (field/operator/value) → conditions JSON
   const legacyRules = dbInstance.prepare(
@@ -159,6 +160,10 @@ async function initDb() {
   upsertDefault('timezone', process.env.TIMEZONE || 'Europe/Moscow');
   upsertDefault('weight_full', '1.0');
   upsertDefault('weight_part', '0.6');
+  upsertDefault('work_hours_enabled', 'false');
+  upsertDefault('work_start', '09:00');
+  upsertDefault('work_end',   '20:00');
+  upsertDefault('work_days',  '1,2,3,4,5');
 
   console.log('[DB] SQLite ready at', DB_PATH);
   return dbInstance;

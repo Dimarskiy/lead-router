@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const pipedrive = require('../services/pipedrive');
+const { distributeQueue, assignLeadToSpecificManager } = require('../services/router');
 
 // ─── Managers ──────────────────────────────────────────────────────────────
 
@@ -251,6 +252,42 @@ router.get('/assignments/stats', (req, res) => {
   `).all();
 
   res.json({ stats, byManager });
+});
+
+// ─── Queue (off-hours leads) ───────────────────────────────────────────────
+
+router.get('/queue', (req, res) => {
+  const rows = db.prepare(
+    "SELECT * FROM assignments WHERE status = 'queued' ORDER BY assigned_at ASC"
+  ).all();
+  res.json({ rows, count: rows.length });
+});
+
+router.post('/queue/distribute', async (req, res) => {
+  try {
+    const result = await distributeQueue();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/queue/assign', async (req, res) => {
+  const { lead_id, manager_id } = req.body || {};
+  if (!lead_id || !manager_id) return res.status(400).json({ error: 'lead_id and manager_id required' });
+  try {
+    const manager = await assignLeadToSpecificManager(lead_id, parseInt(manager_id, 10));
+    res.json({ ok: true, manager: { id: manager.id, name: manager.name } });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete('/queue/:lead_id', (req, res) => {
+  const result = db.prepare(
+    "UPDATE assignments SET status = 'cancelled' WHERE lead_id = ? AND status = 'queued'"
+  ).run(req.params.lead_id);
+  res.json({ ok: true });
 });
 
 // ─── Settings ──────────────────────────────────────────────────────────────

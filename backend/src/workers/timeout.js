@@ -18,7 +18,7 @@ async function checkTimeouts() {
       SELECT a.*, m.name as manager_name, m.slack_user_id, m.pipedrive_user_id
       FROM assignments a
       JOIN managers m ON a.manager_id = m.id
-      WHERE a.status = 'pending' AND a.deadline_at < ?
+      WHERE a.status = 'pending' AND a.deadline_at < ? AND COALESCE(a.is_manual_distribution, 0) = 0
     `).all(now);
 
     console.log(`[Worker] Checking timeouts: ${overdue.length} overdue assignments`);

@@ -1,6 +1,7 @@
 const db = require('../db');
 const pipedrive = require('./pipedrive');
 const slack = require('./slack');
+const { isWorkingHours } = require('./workingHours');
 
 // ── Settings helpers ─────────────────────────────────────────────────
 function getSetting(key, fallback) {
@@ -177,6 +178,24 @@ async function assignLead(leadId, leadData, isReassign = false, excludeManagerId
     return null;
   }
 
+  // Off-hours: queue the lead for morning manual distribution.
+  // Reassignments still flow through normally (worker reassigns timed-out leads).
+  if (!isReassign && !isWorkingHours()) {
+    const existing = db.prepare(
+      "SELECT id FROM assignments WHERE lead_id = ? AND status IN ('queued','pending')"
+    ).get(leadId);
+    if (existing) {
+      console.log(`[Router] Lead ${leadId} already queued/pending (#${existing.id}), skipping queue insert`);
+      return null;
+    }
+    const deadlineAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(
+      'INSERT INTO assignments (lead_id, lead_title, manager_id, deadline_at, status, reassign_count) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(leadId, leadData.title || String(leadId), 0, deadlineAt, 'queued', 0);
+    console.log(`[Router] Lead ${leadId} queued (off-hours)`);
+    return null;
+  }
+
   const timeoutMinutes = parseInt(getSetting('timeout_minutes', '10'), 10);
   const leadFields = await flattenLeadFields(leadData);
   const { managerIds, ruleName } = getManagersForLead(leadFields);
@@ -256,4 +275,85 @@ function rulesReferenceField(fieldName) {
   return false;
 }
 
-module.exports = { assignLead, getManagersForLead, isWithinShift, currentHM };
+// ── Manual distribution from the queue ───────────────────────────────
+// These leads are FINAL — worker never reassigns them on timeout.
+async function finalizeManualAssignment(queuedRow, manager) {
+  const timeoutMinutes = parseInt(getSetting('timeout_minutes', '10'), 10);
+  const deadlineAt = new Date(Date.now() + timeoutMinutes * 60 * 1000).toISOString();
+
+  // Mark old queued row as reassigned and create a fresh pending one
+  db.prepare("UPDATE assignments SET status = 'reassigned' WHERE id = ?").run(queuedRow.id);
+
+  db.prepare(`
+    INSERT INTO assignments
+      (lead_id, lead_title, manager_id, deadline_at, status, reassign_count, is_manual_distribution)
+    VALUES (?, ?, ?, ?, 'pending', 0, 1)
+  `).run(queuedRow.lead_id, queuedRow.lead_title, manager.id, deadlineAt);
+
+  // Pipedrive owner update
+  if (manager.pipedrive_user_id) {
+    const dealId = pipedrive.extractDealId(queuedRow.lead_id);
+    if (dealId && /^\d+$/.test(String(dealId))) {
+      try {
+        await pipedrive.assignDealToUser(dealId, manager.pipedrive_user_id);
+        console.log(`[Router] (manual) Pipedrive deal ${dealId} → user ${manager.pipedrive_user_id}`);
+      } catch (err) { console.error('[Router] Pipedrive update failed:', err.message); }
+    }
+  }
+
+  // Slack notification (reuse normal path; reassignCount=0, manual lead)
+  const lead = { id: queuedRow.lead_id, title: queuedRow.lead_title };
+  try {
+    await slack.notifyAssignment({ manager, lead, isReassign: false, reassignCount: 0, timeoutMinutes });
+  } catch (err) { console.error('[Router] Slack notify failed:', err.message); }
+}
+
+async function distributeQueue() {
+  const queued = db.prepare(
+    "SELECT * FROM assignments WHERE status = 'queued' ORDER BY assigned_at ASC"
+  ).all();
+  if (queued.length === 0) return { distributed: 0 };
+
+  const managers = db.prepare(
+    'SELECT * FROM managers WHERE is_active = 1 ORDER BY round_robin_order ASC'
+  ).all();
+  if (managers.length === 0) {
+    console.warn('[Router] distributeQueue: no active managers');
+    return { distributed: 0, error: 'no_managers' };
+  }
+
+  let count = 0;
+  for (let i = 0; i < queued.length; i++) {
+    const manager = managers[i % managers.length];
+    try {
+      await finalizeManualAssignment(queued[i], manager);
+      count++;
+    } catch (err) {
+      console.error(`[Router] distributeQueue failed for ${queued[i].lead_id}:`, err.message);
+    }
+  }
+  console.log(`[Router] distributeQueue: ${count}/${queued.length} leads assigned`);
+  return { distributed: count };
+}
+
+async function assignLeadToSpecificManager(leadId, managerId) {
+  const queued = db.prepare(
+    "SELECT * FROM assignments WHERE lead_id = ? AND status = 'queued'"
+  ).get(leadId);
+  if (!queued) throw new Error('Lead not in queue');
+
+  const manager = db.prepare('SELECT * FROM managers WHERE id = ? AND is_active = 1').get(managerId);
+  if (!manager) throw new Error('Manager not found or inactive');
+
+  await finalizeManualAssignment(queued, manager);
+  return manager;
+}
+
+module.exports = {
+  assignLead,
+  getManagersForLead,
+  isWithinShift,
+  currentHM,
+  distributeQueue,
+  assignLeadToSpecificManager,
+};
