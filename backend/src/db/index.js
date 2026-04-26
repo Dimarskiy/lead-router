@@ -139,6 +139,9 @@ async function initDb() {
   addCol('managers', 'rr_credit',     'REAL NOT NULL DEFAULT 0');
   addCol('rules',    'conditions',    "TEXT NOT NULL DEFAULT '[]'");
   addCol('assignments', 'is_manual_distribution', 'INTEGER NOT NULL DEFAULT 0');
+  addCol('assignments', 'sla_alerted',  'INTEGER NOT NULL DEFAULT 0');
+  addCol('assignments', 'slack_channel', 'TEXT');
+  addCol('assignments', 'slack_ts',      'TEXT');
 
   // Migrate legacy rules (field/operator/value) → conditions JSON
   const legacyRules = dbInstance.prepare(
@@ -161,6 +164,14 @@ async function initDb() {
   upsertDefault('weight_full', '1.0');
   upsertDefault('weight_part', '0.6');
   upsertDefault('queue_when_off_shift', 'false');
+  upsertDefault('escalation_threshold', '3');
+  upsertDefault('escalation_user_id',   '');
+  upsertDefault('sla_hours',            '2');
+  upsertDefault('sla_alert_channel',    '');
+  upsertDefault('report_channel_id',    '');
+  upsertDefault('report_recipient_user_id', '');
+  upsertDefault('report_cron',          '0 9 * * 1-5');
+  upsertDefault('admin_url',            '');
 
   console.log('[DB] SQLite ready at', DB_PATH);
   return dbInstance;

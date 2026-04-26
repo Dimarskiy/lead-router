@@ -83,13 +83,77 @@ async function processOverdueAssignment(assignment) {
   }
 }
 
-function start() {
-  // Run every 60 seconds
-  cron.schedule('* * * * *', checkTimeouts);
-  console.log('[Worker] Timeout worker started (checking every 60s)');
-
-  // Also run immediately on startup
-  setTimeout(checkTimeouts, 3000);
+// ── Auto-resume managers whose pause expired ──────────────────────────
+async function checkPauses() {
+  try {
+    const rows = db.prepare("SELECT key, value FROM settings WHERE key LIKE 'manager_pause_%'").all();
+    const now = Date.now();
+    for (const r of rows) {
+      if (!r.value) continue;
+      const until = new Date(r.value).getTime();
+      if (isNaN(until) || until > now) continue;
+      const id = parseInt(r.key.replace('manager_pause_', ''), 10);
+      if (!Number.isInteger(id)) continue;
+      db.prepare('UPDATE managers SET is_active = 1 WHERE id = ?').run(id);
+      db.prepare('DELETE FROM settings WHERE key = ?').run(r.key);
+      const m = db.prepare('SELECT * FROM managers WHERE id = ?').get(id);
+      console.log(`[Worker] Auto-resumed manager ${m?.name || id}`);
+      if (m?.slack_user_id) {
+        slack.sendDm(m.slack_user_id, '▶️ Пауза закончилась, ты снова в очереди.').catch(() => {});
+      }
+    }
+  } catch (err) { console.error('[Worker] checkPauses failed:', err.message); }
 }
 
-module.exports = { start, checkTimeouts };
+// ── SLA breach alerts ─────────────────────────────────────────────────
+async function checkSla() {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'sla_hours'").get();
+    const slaHours = parseFloat(row?.value ?? '2');
+    if (!slaHours || slaHours <= 0) return;
+    const channel = (db.prepare("SELECT value FROM settings WHERE key = 'sla_alert_channel'").get()?.value) || '';
+
+    const cutoff = new Date(Date.now() - slaHours * 60 * 60 * 1000).toISOString();
+    const breached = db.prepare(`
+      SELECT a.*, m.name AS manager_name, m.slack_user_id, m.pipedrive_user_id
+      FROM assignments a
+      LEFT JOIN managers m ON a.manager_id = m.id
+      WHERE a.status = 'pending'
+        AND a.assigned_at < ?
+        AND COALESCE(a.sla_alerted, 0) = 0
+    `).all(cutoff);
+
+    if (breached.length === 0) return;
+    console.log(`[SLA] ${breached.length} breached lead(s) detected`);
+
+    for (const a of breached) {
+      const lead = { id: a.lead_id, title: a.lead_title, _deal_id: pipedrive.extractDealId(a.lead_id) };
+      const manager = { name: a.manager_name, slack_user_id: a.slack_user_id };
+      try {
+        await slack.notifySlaBreach({ assignment: a, manager, lead, hours: slaHours, channel });
+        db.prepare('UPDATE assignments SET sla_alerted = 1 WHERE id = ?').run(a.id);
+      } catch (err) {
+        console.error(`[SLA] notify failed for ${a.lead_id}:`, err.message);
+      }
+    }
+  } catch (err) { console.error('[Worker] checkSla failed:', err.message); }
+}
+
+let slaTickCounter = 0;
+async function tick() {
+  await checkPauses();
+  await checkTimeouts();
+  // SLA every ~5 minutes
+  if (slaTickCounter++ % 5 === 0) await checkSla();
+}
+
+function start() {
+  // Run every 60 seconds
+  cron.schedule('* * * * *', tick);
+  console.log('[Worker] Timeout worker started (timeouts/pauses every 60s, SLA every 5m)');
+
+  // Also run immediately on startup
+  setTimeout(tick, 3000);
+}
+
+module.exports = { start, checkTimeouts, checkPauses, checkSla };

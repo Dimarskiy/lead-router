@@ -217,9 +217,10 @@ async function assignLead(leadId, leadData, isReassign = false, excludeManagerId
     ? (priorCount !== null ? priorCount + 1 : 1)
     : (priorCount !== null ? priorCount + 1 : 0);
 
-  db.prepare('INSERT INTO assignments (lead_id, lead_title, manager_id, deadline_at, status, reassign_count) VALUES (?, ?, ?, ?, ?, ?)').run(
-    leadId, leadData.title || String(leadId), manager.id, deadlineAt, 'pending', reassignCount
-  );
+  const insertResult = db.prepare(
+    'INSERT INTO assignments (lead_id, lead_title, manager_id, deadline_at, status, reassign_count) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(leadId, leadData.title || String(leadId), manager.id, deadlineAt, 'pending', reassignCount);
+  const assignmentId = insertResult.lastInsertRowid;
 
   if (manager.pipedrive_user_id) {
     const dealId = leadData._deal_id || pipedrive.extractDealId(leadId);
@@ -231,8 +232,24 @@ async function assignLead(leadId, leadData, isReassign = false, excludeManagerId
     }
   }
 
-  await slack.notifyAssignment({ manager, lead: leadData, isReassign, reassignCount, timeoutMinutes });
-  console.log(`[Router] Lead ${leadId} → ${manager.name} (rule: ${ruleName}, type: ${manager.manager_type || 'full'}, timeout: ${timeoutMinutes}m)`);
+  const slackResp = await slack.notifyAssignment({
+    manager, lead: leadData, isReassign, reassignCount, timeoutMinutes, assignmentId,
+  });
+  if (slackResp?.ts) {
+    db.prepare('UPDATE assignments SET slack_channel = ?, slack_ts = ? WHERE id = ?')
+      .run(slackResp.channel, slackResp.ts, assignmentId);
+  }
+
+  // Escalation alert (after notifyAssignment so it's the last side-effect)
+  const threshold = parseInt(getSetting('escalation_threshold', '3'), 10);
+  if (threshold > 0 && reassignCount >= threshold) {
+    const escUser = getSetting('escalation_user_id', '');
+    try {
+      await slack.notifyEscalation({ manager, lead: leadData, reassignCount, escalationUserId: escUser });
+    } catch (err) { console.error('[Escalation] notify failed:', err.message); }
+  }
+
+  console.log(`[Router] Lead ${leadId} → ${manager.name} (rule: ${ruleName}, type: ${manager.manager_type || 'full'}, timeout: ${timeoutMinutes}m, assignment #${assignmentId})`);
   return manager;
 }
 
@@ -284,11 +301,12 @@ async function finalizeManualAssignment(queuedRow, manager) {
   // Mark old queued row as reassigned and create a fresh pending one
   db.prepare("UPDATE assignments SET status = 'reassigned' WHERE id = ?").run(queuedRow.id);
 
-  db.prepare(`
+  const insRes = db.prepare(`
     INSERT INTO assignments
       (lead_id, lead_title, manager_id, deadline_at, status, reassign_count, is_manual_distribution)
     VALUES (?, ?, ?, ?, 'pending', 0, 1)
   `).run(queuedRow.lead_id, queuedRow.lead_title, manager.id, deadlineAt);
+  const assignmentId = insRes.lastInsertRowid;
 
   // Pipedrive owner update
   if (manager.pipedrive_user_id) {
@@ -304,7 +322,13 @@ async function finalizeManualAssignment(queuedRow, manager) {
   // Slack notification (reuse normal path; reassignCount=0, manual lead)
   const lead = { id: queuedRow.lead_id, title: queuedRow.lead_title };
   try {
-    await slack.notifyAssignment({ manager, lead, isReassign: false, reassignCount: 0, timeoutMinutes });
+    const resp = await slack.notifyAssignment({
+      manager, lead, isReassign: false, reassignCount: 0, timeoutMinutes, assignmentId,
+    });
+    if (resp?.ts) {
+      db.prepare('UPDATE assignments SET slack_channel = ?, slack_ts = ? WHERE id = ?')
+        .run(resp.channel, resp.ts, assignmentId);
+    }
   } catch (err) { console.error('[Router] Slack notify failed:', err.message); }
 }
 

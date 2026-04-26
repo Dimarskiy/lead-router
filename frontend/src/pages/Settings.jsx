@@ -15,6 +15,15 @@ export default function Settings() {
     timezone: 'Europe/Moscow',
     weight_full: '1.0',
     weight_part: '0.6',
+    queue_when_off_shift: 'false',
+    escalation_threshold: '3',
+    escalation_user_id: '',
+    sla_hours: '2',
+    sla_alert_channel: '',
+    report_channel_id: '',
+    report_recipient_user_id: '',
+    report_cron: '0 9 * * 1-5',
+    admin_url: '',
   });
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -117,6 +126,86 @@ export default function Settings() {
               <button className="btn btn-primary" onClick={handleSave}>
                 {saved ? '✓ Сохранено!' : 'Сохранить'}
               </button>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="section-label" style={{ marginBottom: 16 }}>Очередь и эскалация</div>
+              <div className="field" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <label className="toggle">
+                  <input type="checkbox"
+                    checked={settings.queue_when_off_shift === 'true'}
+                    onChange={e => setSettings(s => ({ ...s, queue_when_off_shift: e.target.checked ? 'true' : 'false' }))} />
+                  <span className="toggle-slider" />
+                </label>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 500 }}>Складывать в очередь вне рабочего времени</div>
+                  <div style={{ fontSize: 12, color: 'var(--text3)' }}>Если никто не на смене — лид попадёт во вкладку «Очередь» вместо автораспределения.</div>
+                </div>
+              </div>
+              <div className="field">
+                <label>Эскалация после N переназначений</label>
+                <input className="input" type="number" min="0" max="20" style={{ maxWidth: 120 }}
+                  value={settings.escalation_threshold}
+                  onChange={e => setSettings(s => ({ ...s, escalation_threshold: e.target.value }))} />
+                <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>0 = выкл. По умолчанию 3.</p>
+              </div>
+              <div className="field">
+                <label>Slack ID тимлида (для эскалации)</label>
+                <input className="input" placeholder="U07ABC123"
+                  value={settings.escalation_user_id}
+                  onChange={e => setSettings(s => ({ ...s, escalation_user_id: e.target.value }))} />
+                <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>Если пусто — алерт уйдёт в SLACK_DEFAULT_CHANNEL.</p>
+              </div>
+              <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Сохранено!' : 'Сохранить'}</button>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="section-label" style={{ marginBottom: 16 }}>SLA-алерты</div>
+              <div className="field">
+                <label>Часы до SLA-алерта</label>
+                <input className="input" type="number" min="0" step="0.5" style={{ maxWidth: 120 }}
+                  value={settings.sla_hours}
+                  onChange={e => setSettings(s => ({ ...s, sla_hours: e.target.value }))} />
+                <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>0 = выкл. По умолчанию 2 ч.</p>
+              </div>
+              <div className="field">
+                <label>Канал для SLA-алертов</label>
+                <input className="input" placeholder="#sales-alerts или C0ABC123"
+                  value={settings.sla_alert_channel}
+                  onChange={e => setSettings(s => ({ ...s, sla_alert_channel: e.target.value }))} />
+              </div>
+              <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Сохранено!' : 'Сохранить'}</button>
+            </div>
+
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="section-label" style={{ marginBottom: 16 }}>Утренний отчёт</div>
+              <div className="field">
+                <label>Cron расписания</label>
+                <input className="input" placeholder="0 9 * * 1-5" style={{ fontFamily: 'var(--mono)' }}
+                  value={settings.report_cron}
+                  onChange={e => setSettings(s => ({ ...s, report_cron: e.target.value }))} />
+                <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>По умолчанию Пн-Пт в 9:00 в выбранной таймзоне.</p>
+              </div>
+              <div className="field">
+                <label>Канал отчёта</label>
+                <input className="input" placeholder="#sales или C0ABC123"
+                  value={settings.report_channel_id}
+                  onChange={e => setSettings(s => ({ ...s, report_channel_id: e.target.value }))} />
+              </div>
+              <div className="field">
+                <label>Slack ID получателя в личку (опционально)</label>
+                <input className="input" placeholder="U07ABC123"
+                  value={settings.report_recipient_user_id}
+                  onChange={e => setSettings(s => ({ ...s, report_recipient_user_id: e.target.value }))} />
+                <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>Если задан — отчёт идёт в личку, не в канал.</p>
+              </div>
+              <div className="field">
+                <label>URL админки (для кнопок в Slack)</label>
+                <input className="input" placeholder="https://lead-router-ui-production.up.railway.app"
+                  value={settings.admin_url}
+                  onChange={e => setSettings(s => ({ ...s, admin_url: e.target.value }))} />
+              </div>
+              <button className="btn btn-primary" onClick={handleSave}>{saved ? '✓ Сохранено!' : 'Сохранить'}</button>
             </div>
 
             <div className="card">
