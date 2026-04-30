@@ -29,15 +29,17 @@ router.post('/pipedrive', async (req, res) => {
         console.log(`[Webhook] Skipping ${leadId}: already has active assignment #${existing.id}`);
         return;
       }
+      // Wait for Pipedrive to finish writing products before fetching them
+      await new Promise(r => setTimeout(r, 3000));
       const leadLike = {
+        ...dealData,
         id: leadId,
         _deal_id: dealData.id,
         title: dealData.title || String(dealData.id),
-        value: dealData.value,
-        pipeline_id: dealData.pipeline_id,
-        stage_id: dealData.stage_id,
-        source_name: dealData.origin || '',
-        channel: dealData.channel || '',
+        source_name: dealData.origin || dealData.source_name || '',
+        // Normalize field names to match rule builder field names
+        person_name: dealData.person_name || (typeof dealData.person_id === 'object' ? dealData.person_id?.name : '') || '',
+        organization_name: dealData.org_name || (typeof dealData.org_id === 'object' ? dealData.org_id?.name : '') || '',
       };
       console.log('[Webhook] Processing:', leadLike.title);
       await assignLead(leadLike.id, leadLike, false, []);
