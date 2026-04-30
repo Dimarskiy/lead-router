@@ -253,7 +253,7 @@ async function assignLead(leadId, leadData, isReassign = false, excludeManagerId
   return manager;
 }
 
-// ── Field flattening (with product fetch) ────────────────────────────
+// ── Field flattening (resolves custom set/enum fields → labels) ───────
 async function flattenLeadFields(leadData) {
   const flat = {};
   if (!leadData) return flat;
@@ -262,18 +262,35 @@ async function flattenLeadFields(leadData) {
     if (typeof v !== 'object' || v === null) flat[k] = v;
   });
 
-  // Enrich with products if rules reference the 'product' field
-  const needsProducts = rulesReferenceField('product');
-  if (needsProducts && (leadData._deal_id || leadData.id)) {
-    const dealId = leadData._deal_id || pipedrive.extractDealId(leadData.id);
-    if (dealId && /^\d+$/.test(String(dealId))) {
-      const products = await pipedrive.getDealProducts(dealId);
-      if (products.length > 0) {
-        flat.product = products.map(p => p.name).filter(Boolean).join(',');
-        flat.product_ids = products.map(p => p.id).join(',');
-        flat.product_codes = products.map(p => p.code).filter(Boolean).join(',');
-      } else {
-        flat.product = '';
+  // Resolve custom set/enum field IDs → labels and expose by field name.
+  // e.g. "784192...": "596" → flat["784192..."] = "ai_creator",
+  //                          flat["product"]     = "ai_creator"
+  try {
+    const fieldOptions = await pipedrive.getDealFieldOptions();
+    for (const [key, meta] of Object.entries(fieldOptions)) {
+      const raw = flat[key];
+      if (raw == null || raw === '') continue;
+      const labels = String(raw).split(',')
+        .map(id => meta.options[id.trim()] || id.trim())
+        .join(',');
+      flat[key] = labels;
+      if (meta.name) flat[meta.name] = labels; // e.g. flat.product = "ai_creator"
+    }
+  } catch (err) {
+    console.error('[Router] flattenLeadFields: field options resolve failed:', err.message);
+  }
+
+  // Fallback: if rules reference 'product' and custom field didn't populate it,
+  // try the Pipedrive Products catalog attached to the deal.
+  if (!flat.product) {
+    const needsProducts = rulesReferenceField('product');
+    if (needsProducts && (leadData._deal_id || leadData.id)) {
+      const dealId = leadData._deal_id || pipedrive.extractDealId(leadData.id);
+      if (dealId && /^\d+$/.test(String(dealId))) {
+        const products = await pipedrive.getDealProducts(dealId);
+        if (products.length > 0) {
+          flat.product = products.map(p => p.name).filter(Boolean).join(',');
+        }
       }
     }
   }
