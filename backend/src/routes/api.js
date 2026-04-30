@@ -121,7 +121,16 @@ router.put('/schedules/:manager_id', (req, res) => {
 router.get('/products', async (req, res) => {
   try {
     const products = await pipedrive.getProducts();
-    res.json(products);
+    // Deduplicate by name (case-insensitive) — Pipedrive may have multiple
+    // products with the same display name but different IDs
+    const seen = new Set();
+    const unique = products.filter(p => {
+      const key = (p.name || '').toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    res.json(unique);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
