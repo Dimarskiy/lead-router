@@ -16,13 +16,20 @@ const STATUS_BADGE = {
   reassigned: <span className="badge badge-purple">↻ Переназначен</span>,
 };
 
+function parseUTC(iso) {
+  if (!iso) return null;
+  // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" without timezone —
+  // browsers interpret that as local time, but it's actually UTC. Force UTC.
+  return new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+}
+
 function fmtTime(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return parseUTC(iso).toLocaleString('ru', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
 function timeLeft(deadlineIso) {
-  const diff = new Date(deadlineIso) - Date.now();
+  const diff = parseUTC(deadlineIso) - Date.now();
   if (diff <= 0) return <span style={{ color: 'var(--red)', fontSize: 12 }}>просрочен</span>;
   const mins = Math.ceil(diff / 60000);
   return <span style={{ color: 'var(--amber)', fontSize: 12 }}>{mins} мин</span>;

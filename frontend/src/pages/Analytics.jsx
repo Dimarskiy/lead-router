@@ -1,15 +1,22 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 
+function parseUTC(iso) {
+  if (!iso) return null;
+  // SQLite datetime('now') returns "YYYY-MM-DD HH:MM:SS" without timezone —
+  // browsers interpret that as local time, but it's actually UTC. Force UTC.
+  return new Date(iso.includes('T') ? iso : iso.replace(' ', 'T') + 'Z');
+}
+
 function fmtDate(iso) {
   if (!iso) return '—';
-  return new Date(iso).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
+  return parseUTC(iso).toLocaleDateString('ru', { day: '2-digit', month: '2-digit' });
 }
 
 function avgMinutes(rows) {
   const touched = rows.filter(r => r.touched_at && r.assigned_at);
   if (!touched.length) return null;
-  const avg = touched.reduce((sum, r) => sum + (new Date(r.touched_at) - new Date(r.assigned_at)) / 60000, 0) / touched.length;
+  const avg = touched.reduce((sum, r) => sum + (parseUTC(r.touched_at) - parseUTC(r.assigned_at)) / 60000, 0) / touched.length;
   return Math.round(avg);
 }
 
@@ -26,7 +33,7 @@ export default function Analytics() {
 
   const days = parseInt(period);
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-  const filtered = assignments.filter(a => new Date(a.assigned_at) > since);
+  const filtered = assignments.filter(a => parseUTC(a.assigned_at) > since);
 
   const total = filtered.length;
   const touched = filtered.filter(a => a.status === 'touched').length;
@@ -40,7 +47,7 @@ export default function Analytics() {
     byManager[a.manager_name].total++;
     if (a.status === 'touched') {
       byManager[a.manager_name].touched++;
-      if (a.touched_at && a.assigned_at) byManager[a.manager_name].times.push((new Date(a.touched_at) - new Date(a.assigned_at)) / 60000);
+      if (a.touched_at && a.assigned_at) byManager[a.manager_name].times.push((parseUTC(a.touched_at) - parseUTC(a.assigned_at)) / 60000);
     }
     if (a.status === 'timed_out') byManager[a.manager_name].timed_out++;
   });
