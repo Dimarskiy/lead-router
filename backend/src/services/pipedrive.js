@@ -61,26 +61,45 @@ async function getUsers() {
 }
 
 async function getProducts() {
+  const all = [];
+  let start = 0;
   try {
-    const { data } = await pd.get('/products', { params: { api_token: TOKEN, limit: 500 } });
-    return (data.data || []).map(p => ({ id: p.id, name: p.name, code: p.code }));
+    while (true) {
+      const { data } = await pd.get('/products', {
+        params: { api_token: TOKEN, limit: 500, start },
+      });
+      const items = data.data || [];
+      items.forEach(p => all.push({ id: p.id, name: p.name, code: p.code }));
+      if (!data.additional_data?.pagination?.more_items_in_collection) break;
+      start += items.length;
+    }
   } catch (err) {
     console.error('[Pipedrive] getProducts failed:', err.message);
-    return [];
   }
+  return all;
 }
 
 async function getDealProducts(dealId) {
   const numeric = extractDealId(dealId);
   if (!numeric || !/^\d+$/.test(numeric)) return [];
+  const all = [];
+  let start = 0;
   try {
-    const { data } = await pd.get(`/deals/${numeric}/products`, { params: { api_token: TOKEN } });
-    return (data.data || []).map(p => ({
-      id: p.product_id || p.id,
-      name: p.name,
-      code: p.product?.code || p.code,
-    }));
-  } catch { return []; }
+    while (true) {
+      const { data } = await pd.get(`/deals/${numeric}/products`, {
+        params: { api_token: TOKEN, limit: 500, start },
+      });
+      const items = data.data || [];
+      items.forEach(p => all.push({
+        id: p.product_id || p.id,
+        name: p.name,
+        code: p.product?.code || p.code,
+      }));
+      if (!data.additional_data?.pagination?.more_items_in_collection) break;
+      start += items.length;
+    }
+  } catch { }
+  return all;
 }
 
 module.exports = { assignDealToUser, hasTouchSince, getLead, getUsers, getProducts, getDealProducts, extractDealId };
